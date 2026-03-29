@@ -1,0 +1,11 @@
+# Credenciais — nunca versionar
+.env
+
+# Estado local — gerado automaticamente
+processados.json
+log.txt
+atas_geradas/
+
+# Cache do Whisper
+__pycache__/
+*.pyc
