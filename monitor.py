@@ -20,6 +20,13 @@ if env_path.exists():
             os.environ[chave.strip()] = valor.strip()
 
 import anthropic
+import site
+
+# Adiciona cuDNN do pip ao PATH (o CUDA Toolkit já tem cublas, mas não vem com cuDNN)
+for _site in site.getsitepackages():
+    _cudnn = Path(_site) / "nvidia" / "cudnn" / "bin"
+    if _cudnn.exists() and str(_cudnn) not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = str(_cudnn) + os.pathsep + os.environ.get("PATH", "")
 
 # ──────────────────────────────────────────
 # CONFIGURAÇÕES
@@ -69,23 +76,24 @@ PROMPT_ATA = """Você receberá uma transcrição automática do Teams ou notas 
 1. **Ignore ruídos de transcrição** — remova hesitações ("é...", "tipo assim"), repetições, falas incompletas e conversas paralelas sem relevância.
 
 2. **Extraia as informações obrigatórias:**
-   - Data, participantes identificados na transcrição e duração estimada
+   - Data e duração estimada
    - Tópicos discutidos (pauta real, não necessariamente a pauta planejada)
-   - Decisões tomadas — cada uma com responsável e prazo quando mencionados
-   - Próximos passos / ações — no formato: **ação** → responsável → prazo
+   - Decisões tomadas — com prazo apenas se explicitamente mencionado
+   - Próximos passos / ações
 
-3. **Se alguma informação não estiver na transcrição**, deixe o campo com `—` e adicione uma nota discreta ao final: _"Informações não identificadas na transcrição: [lista]"_
+3. **Nunca mencione nomes de pessoas** em nenhuma parte da ata. Tudo deve ser escrito de forma completamente impessoal.
 
-4. **Tom:** objetivo e profissional. Não parafraseie demais — preserve o sentido das decisões com precisão.
+4. **Se alguma informação não estiver na transcrição**, deixe o campo com `—`.
 
-5. Se o arquivo de áudio contiver silêncio excessivo ou falas inaudíveis, registre como `[trecho inaudível]`.
+5. **Tom:** objetivo e profissional. Não parafraseie demais — preserve o sentido das decisões com precisão.
+
+6. Se o arquivo de áudio contiver silêncio excessivo ou falas inaudíveis, registre como `[trecho inaudível]`.
 
 ## Formato de saída
 
 # Ata de Reunião
 
 **Data:** [data]
-**Participantes:** [nomes identificados]
 **Duração:** [estimada]
 
 ---
@@ -99,16 +107,16 @@ PROMPT_ATA = """Você receberá uma transcrição automática do Teams ou notas 
 
 ## Decisões
 
-| Decisão | Responsável | Prazo |
-|---|---|---|
-| [decisão] | [nome] | [data ou "a definir"] |
+| Decisão | Prazo |
+|---|---|
+| [decisão tomada] | [prazo ou —] |
 
 ---
 
 ## Próximos passos
 
-- [ ] [ação] → [responsável] → [prazo]
-- [ ] [ação] → [responsável] → [prazo]
+- [ ] [ação]
+- [ ] [ação]
 
 ---
 
@@ -117,8 +125,8 @@ _Ata gerada automaticamente a partir de transcrição. Revise antes de compartil
 ## Comportamento esperado
 
 - Se a transcrição for muito longa (+1h de reunião), priorize decisões e próximos passos — a pauta pode ser resumida em bullets curtos.
-- Se houver ambiguidade sobre quem é o responsável por uma ação, registre como `[a confirmar]` em vez de inferir.
-- Nunca invente datas ou prazos que não foram mencionados.
+- **Nunca escreva nomes de pessoas em nenhuma parte da ata.** Tudo impessoal.
+- **Prazos:** nunca invente ou infira datas. Use apenas o que foi dito textualmente. Se não houver prazo, use `—`.
 - Não pare de ler a transcrição se o arquivo for muito grande. Tome o tempo que for necessário. É muito importante que toda a transcrição seja lida."""
 
 
@@ -144,21 +152,74 @@ def salvar_processados(processados: dict):
 
 
 # ──────────────────────────────────────────
+# ──────────────────────────────────────────
+# DOWNLOAD ONEDRIVE
+# ──────────────────────────────────────────
+
+import ctypes
+import time
+
+_FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
+_FILE_ATTRIBUTE_OFFLINE = 0x1000
+_INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+
+def aguardar_download_onedrive(caminho: str, timeout: int = 600) -> bool:
+    """Aguarda o arquivo ser baixado pelo OneDrive se estiver apenas na nuvem."""
+    path = Path(caminho)
+
+    def esta_na_nuvem() -> bool:
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+        if attrs == _INVALID_FILE_ATTRIBUTES:
+            return False
+        return bool(attrs & _FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) or bool(attrs & _FILE_ATTRIBUTE_OFFLINE)
+
+    if not esta_na_nuvem():
+        return True
+
+    log(f"  Arquivo na nuvem (OneDrive). Acionando download: {path.name}...")
+    try:
+        with open(caminho, "rb") as f:
+            f.read(1024)
+    except Exception:
+        pass
+
+    inicio = time.time()
+    while time.time() - inicio < timeout:
+        if not esta_na_nuvem():
+            log(f"  Download concluído: {path.name}")
+            return True
+        time.sleep(5)
+
+    log(f"  AVISO: Timeout aguardando download do OneDrive: {path.name}")
+    return False
+
+
+# ──────────────────────────────────────────
 # TRANSCRIÇÃO (Whisper local)
 # ──────────────────────────────────────────
 
+_whisper_model = None
+
 def transcrever(caminho_mp4: str) -> str:
+    global _whisper_model
     try:
         from faster_whisper import WhisperModel
     except ImportError:
         log("ERRO: faster-whisper não instalado. Execute instalar.bat")
         sys.exit(1)
 
+    if not aguardar_download_onedrive(caminho_mp4):
+        raise RuntimeError("Arquivo não disponível localmente após timeout do OneDrive")
+
     log(f"  Transcrevendo: {Path(caminho_mp4).name} (pode demorar alguns minutos)...")
-    model = WhisperModel("small", device="cpu", compute_type="int8")
-    segments, info = model.transcribe(caminho_mp4, language="pt", beam_size=5)
+    if _whisper_model is None:
+        log(f"  [DEBUG] Carregando modelo Whisper...")
+        _whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+        log(f"  [DEBUG] Modelo carregado.")
+    segments, info = _whisper_model.transcribe(caminho_mp4, language="pt", beam_size=1)
     texto = " ".join([seg.text.strip() for seg in segments])
-    log(f"  Transcrição concluída. Idioma detectado: {info.language} ({info.language_probability:.0%})")
+    idioma, prob = info.language, info.language_probability
+    log(f"  Transcrição concluída. Idioma detectado: {idioma} ({prob:.0%})")
     return texto
 
 
@@ -291,7 +352,14 @@ def markdown_para_html(texto: str) -> str:
 </html>"""
 
 
-def enviar_email(assunto: str, corpo: str):
+def enviar_email(assunto: str, corpo: str, transcricao: str = ""):
+    pasta_saida = Path(__file__).parent / "atas_geradas"
+    pasta_saida.mkdir(exist_ok=True)
+    nome_txt = assunto.replace(":", "").replace("/", "-")[:80] + " - Transcrição.txt"
+    caminho_txt = pasta_saida / nome_txt
+    if transcricao:
+        caminho_txt.write_text(transcricao, encoding="utf-8")
+
     try:
         import win32com.client
         outlook = win32com.client.Dispatch("Outlook.Application")
@@ -299,16 +367,15 @@ def enviar_email(assunto: str, corpo: str):
         mail.To = EMAIL_DESTINO
         mail.Subject = assunto
         mail.HTMLBody = markdown_para_html(corpo)
+        if transcricao:
+            mail.Attachments.Add(str(caminho_txt.resolve()))
         mail.Send()
         log(f"  E-mail enviado para {EMAIL_DESTINO}")
     except Exception as e:
         log(f"  ERRO ao enviar e-mail via Outlook: {e}")
-        # Fallback: salva a ata em arquivo
-        pasta_saida = Path(__file__).parent / "atas_geradas"
-        pasta_saida.mkdir(exist_ok=True)
-        nome_arquivo = assunto.replace(":", "").replace("/", "-")[:80] + ".txt"
-        (pasta_saida / nome_arquivo).write_text(corpo, encoding="utf-8")
-        log(f"  Ata salva em: {pasta_saida / nome_arquivo}")
+        nome_ata = assunto.replace(":", "").replace("/", "-")[:80] + ".txt"
+        (pasta_saida / nome_ata).write_text(corpo, encoding="utf-8")
+        log(f"  Ata salva em: {pasta_saida / nome_ata}")
 
 
 # ──────────────────────────────────────────
@@ -427,17 +494,21 @@ def main():
                     salvar_processados(processados)
                     continue
 
+                log("  Chamando gerar_ata...")
                 ata = gerar_ata(transcricao, arquivo.stem)
-                secao_contatos = montar_secao_participantes(ata)
                 assunto = f"Ata de Reunião — {arquivo.stem}"
-                enviar_email(assunto, ata + secao_contatos)
+                log("  Enviando e-mail...")
+                enviar_email(assunto, ata, transcricao)
+                log("  Enviando para o Teams...")
                 enviar_teams(ata, arquivo.stem, pasta)
 
                 processados[chave] = {"status": "ok", "data": datetime.now().isoformat()}
                 salvar_processados(processados)
 
-            except Exception as e:
-                log(f"  ERRO ao processar {arquivo.name}: {e}")
+            except BaseException as e:
+                log(f"  ERRO ao processar {arquivo.name}: {type(e).__name__}: {e}")
+                import traceback
+                log(traceback.format_exc())
                 processados[chave] = {"status": "erro", "erro": str(e), "data": datetime.now().isoformat()}
                 salvar_processados(processados)
 
