@@ -409,6 +409,10 @@ def enviar_teams(ata: str, nome_reuniao: str, pasta: str):
         (l for l in ata.splitlines() if l.startswith("**Data:**")), ""
     ).replace("**Data:**", "").strip()
 
+    def limpar_titulo(nome: str) -> str:
+        """Remove sufixo de timestamp gerado pelo Teams: -YYYYMMDD_HHMMSStz-Meeting Recording"""
+        return re.sub(r"-\d{8}_\d{6}\w*-Meeting Recording.*", "", nome).strip()
+
     def tabela_para_bullets(tabela: str) -> str:
         """Converte tabela markdown em lista de bullets para o Teams."""
         linhas = [l.strip() for l in tabela.splitlines() if l.strip()]
@@ -421,10 +425,15 @@ def enviar_teams(ata: str, nome_reuniao: str, pasta: str):
                 colunas = [c.strip() for c in linha.strip("|").split("|")]
                 colunas = [c for c in colunas if c]
                 if colunas:
-                    bullets.append("- " + " → ".join(colunas))
+                    # Se a última coluna for "—", omite a seta e o prazo
+                    if len(colunas) >= 2 and colunas[-1] == "—":
+                        bullets.append("- " + colunas[0])
+                    else:
+                        bullets.append("- " + " → ".join(colunas))
         return "\n".join(bullets)
 
-    corpo = f"📋 **Ata de Reunião — {nome_reuniao}**\n\n"
+    titulo = limpar_titulo(nome_reuniao)
+    corpo = f"📋 **Ata de Reunião — {titulo}**\n\n"
     if data_linha:
         corpo += f"📅 **Data:** {data_linha}\n\n"
     if participantes_linha:
@@ -433,7 +442,7 @@ def enviar_teams(ata: str, nome_reuniao: str, pasta: str):
         corpo += f"---\n\n**✅ Decisões**\n\n{tabela_para_bullets(decisoes)}\n\n"
     if proximos:
         corpo += f"---\n\n**⏭ Próximos passos**\n\n{proximos}\n\n"
-    corpo += "---\n\n_Ata gerada automaticamente. Revise antes de compartilhar._"
+    corpo += "---\n\n_Ata gerada automaticamente._"
 
     payload = json.dumps({"text": corpo}).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
