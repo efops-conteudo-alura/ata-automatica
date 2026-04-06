@@ -43,6 +43,7 @@ PASTAS_TARDE = [
     r"C:\Users\vasco\OneDrive - Fiap-Faculdade de Informática e Administração Paulista\Conteúdo - Suporte Educacional - Recordings",
     r"C:\Users\vasco\OneDrive - Fiap-Faculdade de Informática e Administração Paulista\Conteúdo-1🗨 Eficiência Operacional - Gravações",
     r"C:\Users\vasco\OneDrive - Fiap-Faculdade de Informática e Administração Paulista\Gravações",
+    r"C:\Users\vasco\OneDrive - Fiap-Faculdade de Informática e Administração Paulista\Conteúdo-4📅 Ferramentas de IA - Dev e Conteúdo - Gravações",
 ]
 
 EMAIL_DESTINO = "vasco.ginde@alura.com.br"
@@ -66,6 +67,10 @@ WEBHOOKS = {
     r"C:\Users\vasco\OneDrive - Fiap-Faculdade de Informática e Administração Paulista\Conteúdo-1🗨 Eficiência Operacional - Gravações": {
         "canal": "1🗨 Eficiência Operacional",
         "url": "https://fiapcom.webhook.office.com/webhookb2/7fc03465-f1dc-40a5-942c-90acd0aa9727@11dbbfe2-89b8-4549-be10-cec364e59551/IncomingWebhook/36446492cff84c1b8332c527a2556aa6/0f94b05d-4507-4d35-ab13-15127ef23434/V2VINd3H-RHsAS1KIc7smZpTpkriYIj50l9dsHxoGP7Wo1",
+    },
+    r"C:\Users\vasco\OneDrive - Fiap-Faculdade de Informática e Administração Paulista\Conteúdo-4📅 Ferramentas de IA - Dev e Conteúdo - Gravações": {
+        "canal": "4📅 Ferramentas de IA - Dev e Conteúdo",
+        "url": "https://fiapcom.webhook.office.com/webhookb2/7fc03465-f1dc-40a5-942c-90acd0aa9727@11dbbfe2-89b8-4549-be10-cec364e59551/IncomingWebhook/be4660deb2134d359f81305d8ca65d5d/0f94b05d-4507-4d35-ab13-15127ef23434/V2dNf5LDxj5IhwPFWELBGu6_VbnJxBCz55cDLJa3Ewghk1",
     },
 }
 
