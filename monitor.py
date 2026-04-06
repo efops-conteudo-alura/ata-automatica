@@ -83,8 +83,7 @@ PROMPT_ATA = """Você receberá uma transcrição automática do Teams ou notas 
 2. **Extraia as informações obrigatórias:**
    - Data e duração estimada
    - Tópicos discutidos (pauta real, não necessariamente a pauta planejada)
-   - Decisões tomadas — com prazo apenas se explicitamente mencionado
-   - Próximos passos / ações
+   - Encaminhamentos — decisões tomadas e ações combinadas, em lista única, com prazo apenas se explicitamente mencionado
 
 3. **Nunca mencione nomes de pessoas** em nenhuma parte da ata. Tudo deve ser escrito de forma completamente impessoal.
 
@@ -110,18 +109,10 @@ PROMPT_ATA = """Você receberá uma transcrição automática do Teams ou notas 
 
 ---
 
-## Decisões
+## Encaminhamentos
 
-| Decisão | Prazo |
-|---|---|
-| [decisão tomada] | [prazo ou —] |
-
----
-
-## Próximos passos
-
-- [ ] [ação]
-- [ ] [ação]
+- [decisão ou ação] *(prazo: [prazo])*
+- [decisão ou ação]
 
 ---
 
@@ -129,7 +120,7 @@ _Ata gerada automaticamente a partir de transcrição. Revise antes de compartil
 
 ## Comportamento esperado
 
-- Se a transcrição for muito longa (+1h de reunião), priorize decisões e próximos passos — a pauta pode ser resumida em bullets curtos.
+- Se a transcrição for muito longa (+1h de reunião), priorize encaminhamentos — a pauta pode ser resumida em bullets curtos.
 - **Nunca escreva nomes de pessoas em nenhuma parte da ata.** Tudo impessoal.
 - **Prazos:** nunca invente ou infira datas. Use apenas o que foi dito textualmente. Se não houver prazo, use `—`.
 - Não pare de ler a transcrição se o arquivo for muito grande. Tome o tempo que for necessário. É muito importante que toda a transcrição seja lida."""
@@ -405,8 +396,7 @@ def enviar_teams(ata: str, nome_reuniao: str, pasta: str):
         match = re.search(padrao, texto, re.DOTALL)
         return match.group(1).strip() if match else ""
 
-    decisoes = extrair_secao(ata, "Decisões")
-    proximos = extrair_secao(ata, "Próximos passos")
+    encaminhamentos = extrair_secao(ata, "Encaminhamentos")
     participantes_linha = next(
         (l for l in ata.splitlines() if l.startswith("**Participantes:**")), ""
     ).replace("**Participantes:**", "").strip()
@@ -418,35 +408,14 @@ def enviar_teams(ata: str, nome_reuniao: str, pasta: str):
         """Remove sufixo de timestamp gerado pelo Teams: -YYYYMMDD_HHMMSStz-Meeting Recording"""
         return re.sub(r"-\d{8}_\d{6}\w*-Meeting Recording.*", "", nome).strip()
 
-    def tabela_para_bullets(tabela: str) -> str:
-        """Converte tabela markdown em lista de bullets para o Teams."""
-        linhas = [l.strip() for l in tabela.splitlines() if l.strip()]
-        bullets = []
-        for linha in linhas:
-            # Ignora cabeçalho e separador
-            if linha.startswith("|---") or linha.startswith("| ---") or linha.startswith("| Decisão"):
-                continue
-            if linha.startswith("|"):
-                colunas = [c.strip() for c in linha.strip("|").split("|")]
-                colunas = [c for c in colunas if c]
-                if colunas:
-                    # Se a última coluna for "—", omite a seta e o prazo
-                    if len(colunas) >= 2 and colunas[-1] == "—":
-                        bullets.append("- " + colunas[0])
-                    else:
-                        bullets.append("- " + " → ".join(colunas))
-        return "\n".join(bullets)
-
     titulo = limpar_titulo(nome_reuniao)
     corpo = f"📋 **Ata de Reunião — {titulo}**\n\n"
     if data_linha:
         corpo += f"📅 **Data:** {data_linha}\n\n"
     if participantes_linha:
         corpo += f"👥 **Participantes:** {participantes_linha}\n\n"
-    if decisoes:
-        corpo += f"---\n\n**✅ Decisões**\n\n{tabela_para_bullets(decisoes)}\n\n"
-    if proximos:
-        corpo += f"---\n\n**⏭ Próximos passos**\n\n{proximos}\n\n"
+    if encaminhamentos:
+        corpo += f"---\n\n**📌 Encaminhamentos**\n\n{encaminhamentos}\n\n"
     corpo += "---\n\n_Ata gerada automaticamente._"
 
     payload = json.dumps({"text": corpo}).encode("utf-8")
