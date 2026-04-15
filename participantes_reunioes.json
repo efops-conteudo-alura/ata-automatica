@@ -1,0 +1,30 @@
+{
+  "_instrucoes": [
+    "Cada chave é um trecho do nome da reunião (busca parcial, ignora maiúsculas/minúsculas).",
+    "  participantes : lista de nomes separados por vírgula — aparece na ata.",
+    "  emails_extra  : e-mails adicionais de quem NÃO está em contatos.json.",
+    "Os e-mails de quem está em contatos.json são buscados automaticamente pelo nome.",
+    "Deixe participantes em branco ('') para que o diálogo apareça nessa reunião."
+  ],
+
+  "Weekly Enablement": {
+    "participantes": "Andreas Andrade, Cinthia Bregola, David Neves, Mayra Oliveira, Vasco Ginde",
+    "emails_extra": []
+  },
+  "Weekly Suporte Educacional": {
+    "participantes": "Victor Costa, Rafaela Petelin, Nathalia Queiroz, Monalisa Meyrelle, Lorena Garcia, Armano Alves, Iara Martinez, Vasco Ginde",
+    "emails_extra": []
+  },
+  "Weekly Eficiência Operacional": {
+    "participantes": "Rafael Bomfim, Evelyn Reis, Vasco Ginde",
+    "emails_extra": []
+  },
+  "Weekly Ferramentas de IA": {
+    "participantes": "Vasco Ginde, Rafael Bomfim, Evelyn Reis, Nico Steppat, Lucas Varela, Anderson Figueiredo",
+    "emails_extra": ["lucas.varela@alura.com.br", "anderson.figueiredo@alura.com.br"]
+  },
+  "Alinhamento Semanal": {
+    "participantes": "Gabriel Brancaglioni, Ana Horiuchi, Ana Mascarenhas, Ana Oliveira, Bruna Amaral, Denize Silva, Felipe Labouriau, Henrique Bruscagin, Jeferson Silva, Lucas Mata, Mariana Helena, Mirla Costa, Paulo Alves, Pedro Drago, Rodrigo Dias, Rodrigo Ferreira, Samantha Faustino, Rodrigo Ribeiro, Genesys, Jeanmarie, Rafael Balbi, Vasco Ginde, Alysson Manso, Isadora Cardoso, Nico Steppat, Rafael Bomfim, Evelyn Reis, Andreas Andrade, Cinthia Bregola, David Neves, Mayra Oliveira, Vasco Ginde",
+    "emails_extra": []
+  }
+}

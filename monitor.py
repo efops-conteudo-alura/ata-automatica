@@ -74,24 +74,16 @@ WEBHOOKS = {
     },
 }
 
-PROMPT_ATA = """Você receberá uma transcrição automática do Teams ou notas brutas de uma reunião. Seu objetivo é transformar esse conteúdo em uma ata limpa, objetiva e padronizada para o time de Eficiência Operacional da Alura.
+PROMPT_ATA = """Você receberá uma transcrição de reunião e uma lista de participantes. Transforme em uma ata objetiva e padronizada.
 
-## Instruções
+## Regras
 
-1. **Ignore ruídos de transcrição** — remova hesitações ("é...", "tipo assim"), repetições, falas incompletas e conversas paralelas sem relevância.
-
-2. **Extraia as informações obrigatórias:**
-   - Data e duração estimada
-   - Tópicos discutidos (pauta real, não necessariamente a pauta planejada)
-   - Encaminhamentos — decisões tomadas e ações combinadas, em lista única, com prazo apenas se explicitamente mencionado
-
-3. **Nunca mencione nomes de pessoas** em nenhuma parte da ata. Tudo deve ser escrito de forma completamente impessoal.
-
-4. **Se alguma informação não estiver na transcrição**, deixe o campo com `—`.
-
-5. **Tom:** objetivo e profissional. Não parafraseie demais — preserve o sentido das decisões com precisão.
-
-6. Se o arquivo de áudio contiver silêncio excessivo ou falas inaudíveis, registre como `[trecho inaudível]`.
+1. **Ignore ruídos** — hesitações, repetições, falas incompletas, conversas paralelas sem relevância.
+2. **Participantes:** use exatamente a lista fornecida. Se não houver lista, use `—`.
+3. **Extraia:** data, duração estimada, pauta (tópicos discutidos) e encaminhamentos (decisões e ações combinadas).
+4. **Prazos:** inclua `*(prazo: X)*` somente se o prazo foi dito explicitamente. Se não houver prazo, omita completamente.
+5. **Seja conciso** — bullets curtos, sem paráfrase longa. Preserve o sentido com precisão.
+6. Se alguma informação não estiver na transcrição, use `—`.
 
 ## Formato de saída
 
@@ -99,31 +91,24 @@ PROMPT_ATA = """Você receberá uma transcrição automática do Teams ou notas 
 
 **Data:** [data]
 **Duração:** [estimada]
+**Participantes:** [lista fornecida]
 
 ---
 
 ## Pauta
 
-- [tópico 1]
-- [tópico 2]
+- [tópico]
 
 ---
 
 ## Encaminhamentos
 
-- [decisão ou ação] *(prazo: [prazo])*
-- [decisão ou ação]
+- [ação ou decisão] *(prazo: [prazo])*
+- [ação ou decisão sem prazo]
 
 ---
 
-_Ata gerada automaticamente a partir de transcrição. Revise antes de compartilhar._
-
-## Comportamento esperado
-
-- Se a transcrição for muito longa (+1h de reunião), priorize encaminhamentos — a pauta pode ser resumida em bullets curtos.
-- **Nunca escreva nomes de pessoas em nenhuma parte da ata.** Tudo impessoal.
-- **Prazos:** nunca invente ou infira datas. Use apenas o que foi dito textualmente. Se não houver prazo, use `—`.
-- Não pare de ler a transcrição se o arquivo for muito grande. Tome o tempo que for necessário. É muito importante que toda a transcrição seja lida."""
+_Ata gerada automaticamente. Revise antes de compartilhar._"""
 
 
 # ──────────────────────────────────────────
@@ -220,10 +205,103 @@ def transcrever(caminho_mp4: str) -> str:
 
 
 # ──────────────────────────────────────────
+# DIÁLOGO DE PARTICIPANTES
+# ──────────────────────────────────────────
+
+def buscar_participantes_por_padrao(nome_reuniao: str) -> dict | None:
+    """Busca participantes pré-configurados em participantes_reunioes.json."""
+    import re
+    config_path = Path(__file__).parent / "participantes_reunioes.json"
+    if not config_path.exists():
+        return None
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    nome_lower = nome_reuniao.lower()
+
+    for padrao, dados in config.items():
+        if padrao.startswith("_"):
+            continue
+        if padrao.lower() in nome_lower:
+            nomes = dados.get("participantes", "").strip() if isinstance(dados, dict) else str(dados).strip()
+            emails_extra = dados.get("emails_extra", []) if isinstance(dados, dict) else []
+            if nomes:
+                return {"participantes": nomes, "emails_extra": emails_extra}
+            else:
+                return None  # padrão encontrado mas sem nomes → mostrar diálogo
+
+    return None  # padrão não encontrado → mostrar diálogo
+
+
+def pedir_nomes_participantes(nome_reuniao: str, timeout_segundos: int = 600) -> str:
+    """Abre janela com countdown pedindo os nomes dos participantes."""
+    import tkinter as tk
+    import re
+
+    resultado = {"valor": ""}
+    titulo_curto = re.sub(r"-\d{8}_\d{6}\w*-Meeting Recording.*", "", nome_reuniao).strip()[:70]
+
+    root = tk.Tk()
+    root.title("Participantes da reunião")
+    root.attributes("-topmost", True)
+    root.resizable(False, False)
+
+    frame = tk.Frame(root, padx=20, pady=15)
+    frame.pack()
+
+    tk.Label(frame, text=f"Reunião: {titulo_curto}", font=("Arial", 10, "bold"), wraplength=420).pack(anchor="w")
+    tk.Label(frame, text="\nInforme os nomes dos participantes\n(separados por vírgula, ou deixe em branco):", wraplength=420).pack(anchor="w")
+
+    entry = tk.Entry(frame, width=55)
+    entry.pack(pady=8)
+    entry.focus()
+
+    restante = {"segundos": timeout_segundos}
+    timer_label = tk.Label(frame, text=f"Fechando sem nomes em {timeout_segundos}s...", fg="gray", font=("Arial", 8))
+    timer_label.pack()
+
+    def confirmar():
+        resultado["valor"] = entry.get().strip()
+        root.destroy()
+
+    def fechar_sem_nomes():
+        root.destroy()
+
+    def atualizar_timer():
+        restante["segundos"] -= 1
+        if restante["segundos"] <= 0:
+            fechar_sem_nomes()
+        else:
+            timer_label.config(text=f"Fechando sem nomes em {restante['segundos']}s...")
+            root.after(1000, atualizar_timer)
+
+    btn_frame = tk.Frame(frame)
+    btn_frame.pack(pady=8)
+    tk.Button(btn_frame, text="Confirmar", command=confirmar, width=14).pack(side="left", padx=4)
+    tk.Button(btn_frame, text="Gerar sem nomes", command=fechar_sem_nomes, width=14).pack(side="left", padx=4)
+
+    entry.bind("<Return>", lambda e: confirmar())
+    root.after(1000, atualizar_timer)
+    root.mainloop()
+
+    return resultado["valor"]
+
+
+def resolver_emails_participantes(nomes_str: str, emails_extra: list[str]) -> list[str]:
+    """Retorna lista de e-mails dos participantes via contatos.json + emails_extra."""
+    if not nomes_str:
+        return list(emails_extra)
+
+    nomes = [n.strip() for n in nomes_str.split(",") if n.strip()]
+    encontrados, _ = buscar_emails_nos_contatos(nomes)
+    emails = [p["email"] for p in encontrados] + list(emails_extra)
+    return list(dict.fromkeys(emails))  # remove duplicatas mantendo ordem
+
+
+# ──────────────────────────────────────────
 # GERAÇÃO DA ATA (Claude API)
 # ──────────────────────────────────────────
 
-def gerar_ata(transcricao: str, nome_reuniao: str) -> str:
+def gerar_ata(transcricao: str, nome_reuniao: str, participantes: str = "") -> str:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         log("ERRO: ANTHROPIC_API_KEY não encontrada no .env")
@@ -232,13 +310,15 @@ def gerar_ata(transcricao: str, nome_reuniao: str) -> str:
     log(f"  Gerando ata com Claude...")
     client = anthropic.Anthropic(api_key=api_key)
 
+    secao_participantes = f"\nParticipantes informados: {participantes}" if participantes else "\nParticipantes informados: (não informado)"
+
     mensagem = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=4096,
         messages=[
             {
                 "role": "user",
-                "content": f"{PROMPT_ATA}\n\n---\n\nNome da reunião: {nome_reuniao}\n\nTranscrição:\n{transcricao}"
+                "content": f"{PROMPT_ATA}\n\n---\n\nNome da reunião: {nome_reuniao}{secao_participantes}\n\nTranscrição:\n{transcricao}"
             }
         ]
     )
@@ -348,7 +428,7 @@ def markdown_para_html(texto: str) -> str:
 </html>"""
 
 
-def enviar_email(assunto: str, corpo: str, transcricao: str = ""):
+def enviar_email(assunto: str, corpo: str, transcricao: str = "", emails_participantes: list[str] | None = None):
     pasta_saida = Path(__file__).parent / "atas_geradas"
     pasta_saida.mkdir(exist_ok=True)
     nome_txt = assunto.replace(":", "").replace("/", "-")[:80] + " - Transcrição.txt"
@@ -361,6 +441,11 @@ def enviar_email(assunto: str, corpo: str, transcricao: str = ""):
         outlook = win32com.client.Dispatch("Outlook.Application")
         mail = outlook.CreateItem(0)
         mail.To = EMAIL_DESTINO
+        if emails_participantes:
+            emails_cc = [e for e in emails_participantes if e != EMAIL_DESTINO]
+            if emails_cc:
+                mail.CC = "; ".join(emails_cc)
+                log(f"  CC para participantes: {', '.join(emails_cc)}")
         mail.Subject = assunto
         mail.HTMLBody = markdown_para_html(corpo)
         if transcricao:
@@ -477,11 +562,28 @@ def main():
                     salvar_processados(processados)
                     continue
 
+                # Busca participantes pré-configurados ou pede via diálogo
+                config = buscar_participantes_por_padrao(arquivo.stem)
+                if config:
+                    participantes = config["participantes"]
+                    emails_extra = config.get("emails_extra", [])
+                    log(f"  Participantes (pré-configurados): {participantes}")
+                else:
+                    log("  Reunião desconhecida — aguardando nomes dos participantes (timeout: 10 min)...")
+                    participantes = pedir_nomes_participantes(arquivo.stem, timeout_segundos=600)
+                    emails_extra = []
+                    if participantes:
+                        log(f"  Participantes informados: {participantes}")
+                    else:
+                        log("  Nenhum participante informado — campo será omitido.")
+
+                emails_participantes = resolver_emails_participantes(participantes, emails_extra)
+
                 log("  Chamando gerar_ata...")
-                ata = gerar_ata(transcricao, arquivo.stem)
+                ata = gerar_ata(transcricao, arquivo.stem, participantes)
                 assunto = f"Ata de Reunião — {arquivo.stem}"
                 log("  Enviando e-mail...")
-                enviar_email(assunto, ata, transcricao)
+                enviar_email(assunto, ata, transcricao, emails_participantes)
                 log("  Enviando para o Teams...")
                 enviar_teams(ata, arquivo.stem, pasta)
 
