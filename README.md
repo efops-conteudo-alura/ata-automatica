@@ -13,9 +13,13 @@ Aguarda download do OneDrive (se necessário)
         ↓
 Transcrição com Whisper (local, gratuito)
         ↓
-Geração da ata com Claude API
+Resolve participantes:
+  ├─ via participantes_reunioes.json (reuniões recorrentes)
+  └─ via diálogo tkinter (reuniões não reconhecidas, timeout 10 min)
         ↓
-E-mail HTML + transcrição em anexo → você
+Geração da ata com Claude API (claude-sonnet-4-6)
+        ↓
+E-mail HTML + transcrição em anexo → você (+ CC para participantes)
 Teams webhook → canal do time
 ```
 
@@ -69,7 +73,11 @@ Para cada canal que deve receber as atas:
 2. Copie a URL gerada
 3. Cole no dicionário `WEBHOOKS` no `monitor.py`
 
-**6. Agende a execução automática**
+**6. Configure os participantes e contatos** *(opcional, mas recomendado)*
+
+Veja a [seção de Participantes e E-mails](#participantes-e-e-mails) abaixo.
+
+**7. Agende a execução automática**
 
 Abra o PowerShell como Administrador e rode:
 ```powershell
@@ -77,8 +85,8 @@ Abra o PowerShell como Administrador e rode:
 ```
 
 Isso cria duas tarefas no Agendador do Windows:
-- **13h** — pastas com reuniões de manhã
-- **17h** — pastas com reuniões à tarde
+- **GerarAtasReuniao_Manha** — roda às **13h** (pastas com reuniões de manhã)
+- **GerarAtasReuniao_Tarde** — roda às **17h** (pastas com reuniões à tarde)
 
 ---
 
@@ -97,13 +105,63 @@ python monitor.py tarde
 
 ---
 
+## Participantes e E-mails
+
+O sistema resolve automaticamente os participantes de cada reunião em duas etapas:
+
+### 1. `participantes_reunioes.json` — reuniões recorrentes
+
+Mapeia padrões de nome de arquivo para listas fixas de participantes. A busca é parcial e ignora maiúsculas/minúsculas.
+
+```json
+{
+  "Weekly Enablement": {
+    "participantes": "Ana Silva, João Souza, Maria Lima",
+    "emails_extra": []
+  },
+  "Weekly Financeiro": {
+    "participantes": "Carlos Melo, Paula Ramos",
+    "emails_extra": ["externo@empresa.com"]
+  }
+}
+```
+
+- **`participantes`** — nomes separados por vírgula; aparecem na ata e são usados para buscar e-mails em `contatos.json`
+- **`emails_extra`** — e-mails adicionais de pessoas que não estão em `contatos.json` (ex.: convidados externos)
+- Deixe `participantes` vazio (`""`) para que o diálogo apareça mesmo em reuniões reconhecidas
+
+### 2. Diálogo interativo — reuniões não reconhecidas
+
+Quando o nome do arquivo não bate com nenhuma entrada do `participantes_reunioes.json`, uma janela do Tkinter abre pedindo os nomes:
+
+- Digite os nomes separados por vírgula e clique em **Confirmar**
+- Clique em **Gerar sem nomes** para omitir o campo
+- A janela fecha sozinha após **10 minutos** sem interação (a ata é gerada sem nomes)
+
+### 3. `contatos.json` — catálogo de e-mails
+
+Dicionário `"Nome Completo": "email@empresa.com"` usado para montar o CC do e-mail:
+
+```json
+{
+  "Ana Silva": "ana.silva@empresa.com",
+  "João Souza": "joao.souza@empresa.com"
+}
+```
+
+A busca é parcial e case-insensitive — `"João"` encontra `"João Souza"`. Os participantes encontrados nesse arquivo são adicionados automaticamente no campo CC do e-mail gerado.
+
+> **Atenção:** esse arquivo pode conter dados pessoais (e-mails). Avalie se deve incluí-lo no `.gitignore` conforme a política da sua organização.
+
+---
+
 ## Configuração de GPU / CPU
 
 O programa usa o modelo **Whisper large-v3** para transcrição. Por padrão, roda na GPU via CUDA, o que é muito mais rápido. Se você não tiver GPU NVIDIA, é necessário ajustar duas linhas no `monitor.py`.
 
 ### Com GPU NVIDIA (padrão)
 
-Localiza a função `transcrever` no `monitor.py` e confirme que está assim:
+Localize a função `transcrever` no `monitor.py` e confirme que está assim:
 
 ```python
 _whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
@@ -119,7 +177,7 @@ Troque para:
 _whisper_model = WhisperModel("large-v3", device="cpu", compute_type="int8")
 ```
 
-> **Atenção:** na CPU, a transcrição é significativamente mais lenta. Uma reunião de 30 minutos pode levar 10–20 minutos dependendo do processador. Se o tempo for crítico, considere usar um modelo menor como `medium` ou `small` no lugar de `large-v3` — com perda de precisão, mas muito mais rápido.
+> **Atenção:** na CPU, a transcrição é significativamente mais lenta. Uma reunião de 30 minutos pode levar 10–20 minutos dependendo do processador. Se o tempo for crítico, considere usar um modelo menor como `medium` ou `small` — com perda de precisão, mas muito mais rápido.
 
 ### Modelos disponíveis
 
@@ -150,30 +208,32 @@ O programa detecta automaticamente quando um arquivo está apenas na nuvem e agu
 
 ```
 ata-automatica/
-├── monitor.py           # Script principal
-├── agendar_tarefa.ps1   # Cria as tarefas agendadas no Windows
-├── instalar.bat         # Instala as dependências Python
-├── .env                 # Chave da API (não versionar!)
-├── .env.example         # Modelo do .env
-├── processados.json     # Registro de arquivos já processados (gerado automaticamente)
-├── log.txt              # Log de execuções (gerado automaticamente)
-└── atas_geradas/        # Atas salvas localmente em caso de falha no e-mail
+├── monitor.py                   # Script principal
+├── agendar_tarefa.ps1           # Cria as tarefas agendadas no Windows
+├── instalar.bat                 # Instala as dependências Python
+├── .env                         # Chave da API (não versionar!)
+├── .env.example                 # Modelo do .env
+├── contatos.json                # Catálogo nome → e-mail para CC automático
+├── participantes_reunioes.json  # Mapeamento reunião recorrente → participantes
+├── processados.json             # Registro de arquivos já processados (gerado automaticamente)
+├── log.txt                      # Log de execuções (gerado automaticamente)
+└── atas_geradas/                # Atas salvas localmente em caso de falha no e-mail
 ```
 
 ---
 
 ## O que é enviado
 
-### E-mail (só para você)
+### E-mail (para você + CC dos participantes)
 - Ata completa formatada em HTML com cabeçalho em azul
-- Tabela de decisões com prazos (quando mencionados)
-- Próximos passos
+- Participantes encontrados em `contatos.json` são adicionados em CC automaticamente
+- Próximos passos e encaminhamentos com prazos (quando mencionados)
 - Transcrição bruta do Whisper em anexo (`.txt`)
 
 ### Teams (canal do time)
-- Resumo com data
-- Decisões em formato de lista
-- Próximos passos
+- Resumo com data e participantes
+- Encaminhamentos em formato de lista
+- Enviado somente para pastas com webhook configurado no dicionário `WEBHOOKS`
 
 ---
 
@@ -192,7 +252,7 @@ ata-automatica/
 
 | Biblioteca | Uso |
 |---|---|
-| `anthropic` | Geração da ata via Claude API |
+| `anthropic` | Geração da ata via Claude API (modelo `claude-sonnet-4-6`) |
 | `faster-whisper` | Transcrição local do áudio |
 | `pywin32` | Envio de e-mail via Outlook e leitura de atributos de arquivo |
 | `markdown` | Conversão do markdown para HTML no e-mail |
